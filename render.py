@@ -7,7 +7,8 @@ import math
 
 FILM_SIZE = 512                 # Output resolution
 PLANE_SIZE = 10                 # Entire fabric size
-CAMERA_Z = 5                    # Camera position (0, 0, 8)
+CAMERA_UP = (0, 0, 1)
+CAMERA_LOOK_AT = ((0, 3, 5), (0, 0, 0))     # (origin, target)
 FOV = 90                        # Camera fov
 LIGHT_POSITION = (0, 0, 7)
 LIGHT_INTENSITY = 500
@@ -19,51 +20,69 @@ SCALING = 2
 
 # Intersect with the fabric plane.
 # Same as mitsuba, wi points to the camera and wo points to the light.
-# Return: wo_to_front_light, wo_to_back_light, 1.0/distance_to_front_light, 1.0/distance_to_back_light,
+# Return: wo_to_light, 1.0/distance_to_light,
 #         wi_to_camera, u, v, points. (all of shape(spp, height, width, channel))
-def get_intersections(spp=SPP):
-
-    V_PLANE_SIZE = 2 * CAMERA_Z * math.tan(FOV * PI / 360)    # Visible fabric size
-    CAMERA_POS  = torch.tensor([V_PLANE_SIZE / 2, -V_PLANE_SIZE / 2, CAMERA_Z])
-    LIGHT_POS = torch.tensor([V_PLANE_SIZE / 2 + LIGHT_POSITION[0],
-                              -V_PLANE_SIZE / 2 + LIGHT_POSITION[1],
-                              LIGHT_POSITION[2]])
-    assert (V_PLANE_SIZE <= PLANE_SIZE)
+def get_intersections_plus(spp=SPP):
     assert (int(math.sqrt(spp)) ** 2 == spp)
+
+    # camera space
+    zz = -FILM_SIZE * 0.5 * math.tan(FOV * PI / 360)
+    x = torch.arange(0.0, FILM_SIZE, 1.0) - FILM_SIZE / 2
+    y = -torch.arange(0.0, FILM_SIZE, 1.0) + FILM_SIZE / 2
+    grid_x, grid_y = torch.meshgrid(x, y, indexing='xy')
 
     root = torch.sqrt(torch.as_tensor(spp))
     root = torch.round(root).int()
     interval = 1 / root
-    points = []
+    xs = []
+    ys = []
     for i in range(root):
         for j in range(root):
             x_offset = i * interval + torch.rand([FILM_SIZE, FILM_SIZE]) / root
             y_offset = j * interval + torch.rand([FILM_SIZE, FILM_SIZE]) / root
+            xs.append(grid_x + x_offset)
+            ys.append(grid_y - y_offset)
 
-            offset = torch.stack([x_offset, -y_offset], dim=2)
-            dx = torch.arange(0, FILM_SIZE)
-            dy = torch.arange(0, -FILM_SIZE, -1).reshape(FILM_SIZE, 1)
-            offset[..., 0] += dx
-            offset[..., 1] += dy
-            offset *= V_PLANE_SIZE / FILM_SIZE
-            pos = torch.concat([offset, torch.zeros(FILM_SIZE, FILM_SIZE, 1)], dim=2)
-            points.append(pos)
+    grid_x = torch.stack(xs, dim=0)
+    grid_y = torch.stack(ys, dim=0)
 
-    points = torch.stack(points)
-    uvs = points[..., [0, 1]] / PLANE_SIZE
-    uvs[..., 1] += 1
-    wo = LIGHT_POS - points
-    idis = 1.0 / length(wo)
-    wo = normalize3(wo)
-    wi = normalize3(CAMERA_POS - points)
+    wis = torch.stack([grid_x, grid_y, zz * torch.ones_like(grid_x)], dim=-1)
+    wis = normalize3(wis)
+
+    # transform to world space
+    origin = torch.tensor(CAMERA_LOOK_AT[0], dtype=FLOAT_TYPE)
+    target = torch.tensor(CAMERA_LOOK_AT[1], dtype=FLOAT_TYPE)
+    up = torch.tensor(CAMERA_UP, dtype=FLOAT_TYPE)
+
+    forward = normalize3(target - origin)
+    right = normalize3(torch.cross(up, -forward))
+    up = normalize3(torch.cross(-forward, right))
+    rotation = torch.stack([right, up, -forward], dim=1)
+
+    assert (not torch.allclose(right, torch.zeros_like(right)))
+
+    wis = wis.view(-1, 3)
+    wis = normalize3(torch.matmul(wis, rotation.T).view(spp, FILM_SIZE, FILM_SIZE, 3))
+
+    # intersection
+    time = -origin[..., [2]] / wis[..., [2]]
+    position = origin + time * wis
+
+    uvs = position[..., [0, 1]] / PLANE_SIZE + 0.5
+    # uvs[uvs > 1] = 0.0
+    # uvs[uvs < 0] = 0.0
     us = uvs[..., [0]]
     vs = uvs[..., [1]]
-    return (wo.to(DEVICE), idis.to(DEVICE),
-            wi.to(DEVICE), us.to(DEVICE), vs.to(DEVICE), points.to(DEVICE))
+    wos = torch.tensor(LIGHT_POSITION, dtype=FLOAT_TYPE) - position
+    idis = 1.0 / length(wos)
+    wos = normalize3(wos)
+
+    return (wos.to(DEVICE), idis.to(DEVICE),
+            -wis.to(DEVICE), us.to(DEVICE), vs.to(DEVICE), position.to(DEVICE))
 
 
 set_seed(0) # for default intersection
-default_intersections = get_intersections()
+default_intersections = get_intersections_plus()
 
 
 class Layer:
@@ -143,6 +162,9 @@ class Layer:
 
         normal = normalize3(normal)
         orientation = normalize3(orientation)
+
+        thickness[torch.logical_or(u > 1, u < 0)] = 0.0
+        thickness[torch.logical_or(v > 1, v < 0)] = 0.0
 
         # all info our bsdf needs.
         return normal, orientation, roughness, thickness, specular, F0
