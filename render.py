@@ -27,8 +27,8 @@ def get_intersections_plus(spp=SPP):
 
     # camera space
     zz = -FILM_SIZE * 0.5 * math.tan(FOV * PI / 360)
-    x = torch.arange(0.0, FILM_SIZE, 1.0) - FILM_SIZE / 2
-    y = -torch.arange(0.0, FILM_SIZE, 1.0) + FILM_SIZE / 2
+    x = torch.arange(0.0, FILM_SIZE, 1.0).to(DEVICE) - FILM_SIZE / 2
+    y = -torch.arange(0.0, FILM_SIZE, 1.0).to(DEVICE) + FILM_SIZE / 2
     grid_x, grid_y = torch.meshgrid(x, y, indexing='xy')
 
     root = torch.sqrt(torch.as_tensor(spp))
@@ -38,8 +38,8 @@ def get_intersections_plus(spp=SPP):
     ys = []
     for i in range(root):
         for j in range(root):
-            x_offset = i * interval + torch.rand([FILM_SIZE, FILM_SIZE]) / root
-            y_offset = j * interval + torch.rand([FILM_SIZE, FILM_SIZE]) / root
+            x_offset = i * interval + torch.rand([FILM_SIZE, FILM_SIZE]).to(DEVICE) / root
+            y_offset = j * interval + torch.rand([FILM_SIZE, FILM_SIZE]).to(DEVICE) / root
             xs.append(grid_x + x_offset)
             ys.append(grid_y - y_offset)
 
@@ -50,9 +50,9 @@ def get_intersections_plus(spp=SPP):
     wis = normalize3(wis)
 
     # transform to world space
-    origin = torch.tensor(CAMERA_LOOK_AT[0], dtype=FLOAT_TYPE)
-    target = torch.tensor(CAMERA_LOOK_AT[1], dtype=FLOAT_TYPE)
-    up = torch.tensor(CAMERA_UP, dtype=FLOAT_TYPE)
+    origin = torch.tensor(CAMERA_LOOK_AT[0], dtype=FLOAT_TYPE).to(DEVICE)
+    target = torch.tensor(CAMERA_LOOK_AT[1], dtype=FLOAT_TYPE).to(DEVICE)
+    up = torch.tensor(CAMERA_UP, dtype=FLOAT_TYPE).to(DEVICE)
 
     forward = normalize3(target - origin)
     right = normalize3(torch.cross(up, -forward))
@@ -73,12 +73,11 @@ def get_intersections_plus(spp=SPP):
     # uvs[uvs < 0] = 0.0
     us = uvs[..., [0]]
     vs = uvs[..., [1]]
-    wos = torch.tensor(LIGHT_POSITION, dtype=FLOAT_TYPE) - position
+    wos = torch.tensor(LIGHT_POSITION, dtype=FLOAT_TYPE).to(DEVICE) - position
     idis = 1.0 / length(wos)
     wos = normalize3(wos)
 
-    return (wos.to(DEVICE), idis.to(DEVICE),
-            -wis.to(DEVICE), us.to(DEVICE), vs.to(DEVICE), position.to(DEVICE))
+    return (wos, idis, -wis, us, vs, position)
 
 
 set_seed(0) # for default intersection
