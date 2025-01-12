@@ -5,14 +5,14 @@ import math
 
 # region configuration
 
-FILM_SIZE = 512                 # Output resolution
-PLANE_SIZE = 10                 # Entire fabric size
-CAMERA_UP = (0, 0, 1)
-CAMERA_LOOK_AT = ((0, 3, 5), (0, 0, 0))     # (origin, target)
-FOV = 90                        # Camera fov
+FILM_SIZE = 512                             # Output resolution
+PLANE_SIZE = 10                             # Entire fabric size
+CAMERA_UP = (0, 1, 0)                       # Camera up direction
+CAMERA_LOOK_AT = ((0, 0, 5), (0, 0, 0))     # (origin, target)
+FOV = 90                                    # Camera fov
 LIGHT_POSITION = (0, 0, 7)
-LIGHT_INTENSITY = 500
-SPP = 4
+LIGHT_INTENSITY = 400
+SPP = 1
 SCALING = 2
 
 # endregion
@@ -120,6 +120,21 @@ class Layer:
         for k, v in self.maps.items():
             varlist.append(v)
         return varlist
+
+    def param_name(self):
+        def rstr(x, rd=2):
+            if len(x.shape) == 0:
+                return round(x.item(), rd)
+            else:
+                s = ""
+                for i in x:
+                    s = s + f",{round(i.item(), rd)}"
+                return s[1:]
+
+
+        name = (f"R_{rstr(self.roughness)}_T_{rstr(self.thickness)}"
+                f"Ks_{rstr(self.specular, 3)}_F0_{rstr(self.F0)}")
+        return name
 
     def correct_params(self):
         with torch.no_grad():
@@ -245,8 +260,8 @@ class Layer:
 
 
 # Return both reflection and transmission render results.
-def render_twolayer(layer0, layer1):
-    WOs, IDISs, WIs, Us, Vs, POINTs = default_intersections
+def render_twolayer(layer0, layer1, intersections = default_intersections):
+    WOs, IDISs, WIs, Us, Vs, POINTs = intersections
 
     if LIGHT_POSITION[2] > 0:
         # reflection
@@ -302,11 +317,11 @@ def render_singlelayer(layer0):
 
 if __name__ == "__main__":
 
-    layer0 = Layer(0.5, 0.5, [0.4, 0.2, 0.7], [1, 1, 1], True)
-    layer0.set_map("orientation", spectrum2vector(readexr("textures/orientation.exr")), tiles=(80, 80))
+    layer0 = Layer(0.3, 0.2, [0.4, 0.2, 0.7], [1, 1, 1], False)
+    # layer0.set_map("orientation", spectrum2vector(readexr("textures/orientation.exr")), tiles=(80, 80))
     layer0.to(DEVICE)
 
-    layer1 = Layer(0.3, 1.0, [0.4, 0.2, 0.7], [0.2], False)
+    layer1 = Layer(0.6, 100.0, [0.4, 0.2, 0.7], [0.2], False)
     layer1.set_map("specular", sRGB2linear(readimg("textures/albedo2.png")))
     layer1.to(DEVICE)
 

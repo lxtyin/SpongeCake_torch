@@ -60,6 +60,7 @@ def linear2sRGB(img):
     tmp[img != 0] = torch.pow(img[img != 0], 1.0 / 2.2)
     return tmp
 
+
 # endregion
 
 
